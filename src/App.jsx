@@ -1,0 +1,424 @@
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { 
+  Database, Plus, Trash2, Key, Link as LinkIcon, 
+  ArrowUp, ArrowDown, X, Move
+} from 'lucide-react';
+
+// Generador de IDs simples
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+// Datos iniciales para demostración
+const initialTables = [
+  {
+    id: 't1',
+    name: 'Usuarios',
+    x: 100, y: 80,
+    fields: [
+      { id: 'f1_1', name: 'id_usuario', type: 'INT', isPk: true },
+      { id: 'f1_2', name: 'nombre', type: 'VARCHAR', isPk: false },
+      { id: 'f1_3', name: 'email', type: 'VARCHAR', isPk: false },
+    ]
+  },
+  {
+    id: 't2',
+    name: 'Pedidos',
+    x: 450, y: 150,
+    fields: [
+      { id: 'f2_1', name: 'id_pedido', type: 'INT', isPk: true },
+      { id: 'f2_2', name: 'id_usuario', type: 'INT', isPk: false },
+      { id: 'f2_3', name: 'total', type: 'DECIMAL', isPk: false },
+      { id: 'f2_4', name: 'fecha', type: 'DATETIME', isPk: false },
+    ]
+  }
+];
+
+const initialRelationships = [
+  { id: 'r1', sourceTableId: 't1', sourceFieldId: 'f1_1', targetTableId: 't2', targetFieldId: 'f2_2' }
+];
+
+const DATA_TYPES = ['INT', 'VARCHAR', 'TEXT', 'BOOLEAN', 'DATE', 'DATETIME', 'DECIMAL', 'FLOAT'];
+
+export default function App() {
+  const [tables, setTables] = useState(initialTables);
+  const [relationships, setRelationships] = useState(initialRelationships);
+  const [draggingTable, setDraggingTable] = useState(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [connecting, setConnecting] = useState(null);
+  const [lines, setLines] = useState([]);
+  
+  const canvasRef = useRef(null);
+
+  // --- LÓGICA DE DIBUJO DE LÍNEAS ---
+  const updateLines = useCallback(() => {
+    if (!canvasRef.current) return;
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    
+    const newLines = relationships.map(rel => {
+      const sourceEl = document.getElementById(`field-${rel.sourceTableId}-${rel.sourceFieldId}`);
+      const targetEl = document.getElementById(`field-${rel.targetTableId}-${rel.targetFieldId}`);
+      
+      if (!sourceEl || !targetEl) return null;
+
+      const sRect = sourceEl.getBoundingClientRect();
+      const tRect = targetEl.getBoundingClientRect();
+
+      const sX = sRect.right - canvasRect.left;
+      const sY = sRect.top + sRect.height / 2 - canvasRect.top;
+      
+      const tX = tRect.left - canvasRect.left;
+      const tY = tRect.top + tRect.height / 2 - canvasRect.top;
+
+      return { id: rel.id, sX, sY, tX, tY };
+    }).filter(Boolean);
+
+    setLines(newLines);
+  }, [relationships, tables]);
+
+  useEffect(() => {
+    updateLines();
+    window.addEventListener('resize', updateLines);
+    const timeout = setTimeout(updateLines, 50);
+    return () => {
+      window.removeEventListener('resize', updateLines);
+      clearTimeout(timeout);
+    };
+  }, [tables, relationships, updateLines]);
+
+  // --- LÓGICA DE DRAG & DROP DE TABLAS ---
+  const handlePointerDown = (e, table) => {
+    if (e.target.closest('button') || e.target.tagName.toLowerCase() === 'input' || e.target.tagName.toLowerCase() === 'select') {
+      return;
+    }
+    
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    setDraggingTable(table.id);
+    setDragOffset({
+      x: e.clientX - canvasRect.left - table.x,
+      y: e.clientY - canvasRect.top - table.y
+    });
+  };
+
+  const handlePointerMove = (e) => {
+    if (!draggingTable || !canvasRef.current) return;
+
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - canvasRect.left - dragOffset.x;
+    const y = e.clientY - canvasRect.top - dragOffset.y;
+
+    setTables(prev => prev.map(t => 
+      t.id === draggingTable ? { ...t, x: Math.max(0, x), y: Math.max(0, y) } : t
+    ));
+  };
+
+  const handlePointerUp = () => {
+    setDraggingTable(null);
+  };
+
+  // --- GESTIÓN DE TABLAS ---
+  const addTable = () => {
+    const newTable = {
+      id: generateId(),
+      name: 'Nueva_Tabla',
+      x: 50 + Math.random() * 50,
+      y: 50 + Math.random() * 50,
+      fields: [{ id: generateId(), name: 'id', type: 'INT', isPk: true }]
+    };
+    setTables([...tables, newTable]);
+  };
+
+  const deleteTable = (tableId) => {
+    if(!window.confirm("¿Seguro que deseas eliminar esta tabla y sus relaciones?")) return;
+    setTables(tables.filter(t => t.id !== tableId));
+    setRelationships(relationships.filter(r => r.sourceTableId !== tableId && r.targetTableId !== tableId));
+  };
+
+  const updateTableName = (tableId, newName) => {
+    setTables(tables.map(t => t.id === tableId ? { ...t, name: newName } : t));
+  };
+
+  // --- GESTIÓN DE CAMPOS ---
+  const addField = (tableId) => {
+    setTables(tables.map(t => {
+      if (t.id === tableId) {
+        return {
+          ...t,
+          fields: [...t.fields, { id: generateId(), name: 'nuevo_campo', type: 'VARCHAR', isPk: false }]
+        };
+      }
+      return t;
+    }));
+  };
+
+  const updateField = (tableId, fieldId, updates) => {
+    setTables(tables.map(t => {
+      if (t.id === tableId) {
+        return {
+          ...t,
+          fields: t.fields.map(f => f.id === fieldId ? { ...f, ...updates } : f)
+        };
+      }
+      return t;
+    }));
+  };
+
+  const deleteField = (tableId, fieldId) => {
+    setTables(tables.map(t => {
+      if (t.id === tableId) {
+        return { ...t, fields: t.fields.filter(f => f.id !== fieldId) };
+      }
+      return t;
+    }));
+    setRelationships(relationships.filter(r => 
+      !(r.sourceTableId === tableId && r.sourceFieldId === fieldId) &&
+      !(r.targetTableId === tableId && r.targetFieldId === fieldId)
+    ));
+  };
+
+  const moveField = (tableId, index, direction) => {
+    setTables(tables.map(t => {
+      if (t.id === tableId) {
+        const newFields = [...t.fields];
+        if (direction === 'up' && index > 0) {
+          [newFields[index - 1], newFields[index]] = [newFields[index], newFields[index - 1]];
+        } else if (direction === 'down' && index < newFields.length - 1) {
+          [newFields[index + 1], newFields[index]] = [newFields[index], newFields[index + 1]];
+        }
+        return { ...t, fields: newFields };
+      }
+      return t;
+    }));
+  };
+
+  // --- GESTIÓN DE RELACIONES ---
+  const handleConnectClick = (tableId, fieldId) => {
+    if (connecting) {
+      if (connecting.tableId !== tableId) {
+        setRelationships([...relationships, {
+          id: generateId(),
+          sourceTableId: connecting.tableId,
+          sourceFieldId: connecting.fieldId,
+          targetTableId: tableId,
+          targetFieldId: fieldId
+        }]);
+      }
+      setConnecting(null);
+    } else {
+      setConnecting({ tableId, fieldId });
+    }
+  };
+
+  const removeRelationship = (relId) => {
+    setRelationships(relationships.filter(r => r.id !== relId));
+  };
+
+  const cancelConnection = () => {
+    setConnecting(null);
+  };
+
+  return (
+    <div className="flex flex-col h-screen w-full bg-slate-50 font-sans text-slate-800">
+      
+      {/* HEADER / TOOLBAR */}
+      <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-20">
+        <div className="flex items-center gap-2">
+          <Database className="text-blue-600 w-6 h-6" />
+          <h1 className="text-xl font-bold text-slate-700">ERD Builder</h1>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          {connecting && (
+            <div className="bg-amber-100 text-amber-800 px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-2 border border-amber-200 shadow-sm animate-pulse">
+              Selecciona otro campo para conectar...
+              <button onClick={cancelConnection} className="hover:bg-amber-200 p-1 rounded-full text-amber-900 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          
+          <button 
+            onClick={addTable}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" /> Nueva Tabla
+          </button>
+        </div>
+      </div>
+
+      {/* CANVAS */}
+      <div 
+        ref={canvasRef}
+        className="flex-1 relative overflow-hidden bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px]"
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+      >
+        {/* LÍNEAS SVG */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+          {lines.map(line => {
+            const dist = Math.abs(line.tX - line.sX) * 0.5;
+            const pathData = `M ${line.sX} ${line.sY} C ${line.sX + dist} ${line.sY}, ${line.tX - dist} ${line.tY}, ${line.tX} ${line.tY}`;
+            
+            return (
+              <g key={line.id} className="pointer-events-auto">
+                <path 
+                  d={pathData} 
+                  stroke="transparent" 
+                  strokeWidth="20" 
+                  fill="none" 
+                  className="cursor-pointer"
+                  onClick={() => removeRelationship(line.id)}
+                />
+                <path 
+                  d={pathData} 
+                  stroke="#94a3b8" 
+                  strokeWidth="2" 
+                  fill="none" 
+                  className="transition-colors hover:stroke-red-500 cursor-pointer"
+                  onClick={() => removeRelationship(line.id)}
+                />
+                <circle cx={line.sX} cy={line.sY} r="4" fill="#3b82f6" />
+                <circle cx={line.tX} cy={line.tY} r="4" fill="#3b82f6" />
+                
+                <foreignObject 
+                  x={(line.sX + line.tX) / 2 - 10} 
+                  y={(line.sY + line.tY) / 2 - 10} 
+                  width="20" height="20"
+                >
+                  <div 
+                    className="bg-white rounded-full border border-slate-300 w-5 h-5 flex items-center justify-center cursor-pointer text-slate-400 hover:text-red-500 hover:border-red-500 shadow-sm"
+                    onClick={() => removeRelationship(line.id)}
+                    title="Eliminar relación"
+                  >
+                    <X className="w-3 h-3" />
+                  </div>
+                </foreignObject>
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* TABLAS */}
+        {tables.map(table => (
+          <div 
+            key={table.id}
+            className={`absolute bg-white rounded-lg shadow-lg border w-80 flex flex-col z-10 ${
+              draggingTable === table.id ? 'ring-2 ring-blue-400 shadow-xl opacity-95 cursor-grabbing' : 'border-slate-200'
+            }`}
+            style={{ 
+              transform: `translate(${table.x}px, ${table.y}px)`,
+              cursor: draggingTable === table.id ? 'grabbing' : 'default'
+            }}
+          >
+            {/* Cabecera de la Tabla */}
+            <div 
+              className="bg-slate-800 text-white px-3 py-2 rounded-t-lg flex items-center justify-between cursor-grab active:cursor-grabbing group"
+              onPointerDown={(e) => handlePointerDown(e, table)}
+            >
+              <div className="flex items-center gap-2 flex-1">
+                <Move className="w-4 h-4 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <input 
+                  type="text" 
+                  value={table.name}
+                  onChange={(e) => updateTableName(table.id, e.target.value)}
+                  className="bg-transparent border-none text-white font-semibold focus:ring-0 focus:outline-none w-full"
+                />
+              </div>
+              <button 
+                onClick={() => deleteTable(table.id)}
+                className="text-slate-400 hover:text-red-400 p-1"
+                title="Eliminar Tabla"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Lista de Campos */}
+            <div className="p-1 flex flex-col gap-1 bg-white rounded-b-lg">
+              {table.fields.map((field, index) => {
+                const isConnecting = connecting?.tableId === table.id && connecting?.fieldId === field.id;
+                
+                return (
+                  <div 
+                    key={field.id}
+                    id={`field-${table.id}-${field.id}`}
+                    className={`flex items-center gap-1.5 p-1.5 rounded-md border border-transparent hover:border-slate-100 hover:bg-slate-50 group relative ${
+                      isConnecting ? 'ring-1 ring-amber-400 bg-amber-50' : ''
+                    }`}
+                  >
+                    {/* Botones de Reorden */}
+                    <div className="flex flex-col opacity-20 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => moveField(table.id, index, 'up')} disabled={index === 0} className="hover:text-blue-600 disabled:opacity-30">
+                        <ArrowUp className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => moveField(table.id, index, 'down')} disabled={index === table.fields.length - 1} className="hover:text-blue-600 disabled:opacity-30">
+                        <ArrowDown className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    {/* PK Toggle */}
+                    <button 
+                      onClick={() => updateField(table.id, field.id, { isPk: !field.isPk })}
+                      className={`p-1 rounded ${field.isPk ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}`}
+                      title="Llave Primaria"
+                    >
+                      <Key className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* Nombre del Campo */}
+                    <input 
+                      type="text" 
+                      value={field.name}
+                      onChange={(e) => updateField(table.id, field.id, { name: e.target.value })}
+                      className={`flex-1 min-w-0 text-sm font-medium focus:outline-none focus:bg-blue-50 px-1 py-0.5 rounded ${field.isPk ? 'font-bold' : ''}`}
+                    />
+
+                    {/* Tipo de Dato */}
+                    <select
+                      value={field.type}
+                      onChange={(e) => updateField(table.id, field.id, { type: e.target.value })}
+                      className="text-xs text-slate-500 bg-transparent border-none focus:ring-0 p-0 w-20 cursor-pointer appearance-none hover:bg-slate-100 rounded"
+                    >
+                      {DATA_TYPES.map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                    </select>
+
+                    {/* Acciones del Campo */}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
+                      <button 
+                        onClick={() => handleConnectClick(table.id, field.id)}
+                        className={`p-1 rounded transition-colors ${
+                          isConnecting 
+                            ? 'text-amber-600 bg-amber-100' 
+                            : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
+                        }`}
+                        title="Conectar (Relación)"
+                      >
+                        <LinkIcon className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => deleteField(table.id, field.id)}
+                        className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                        title="Eliminar campo"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Botón Agregar Campo */}
+              <button 
+                onClick={() => addField(table.id)}
+                className="mt-1 flex items-center justify-center gap-1 py-1.5 text-xs font-medium text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors w-full border border-dashed border-slate-200"
+              >
+                <Plus className="w-3.5 h-3.5" /> Agregar campo
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
